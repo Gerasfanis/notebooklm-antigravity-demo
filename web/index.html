@@ -14,6 +14,7 @@
       .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
       button { border: 0; padding: 10px 14px; border-radius: 12px; cursor: pointer; background: #2f6fed; color: white; font-weight: 600; }
       button.secondary { background: #1e2a45; color: #d6dded; border: 1px solid #2a3a5f; }
+      button:disabled { opacity: 0.55; cursor: not-allowed; }
       select { background: #0f1524; color: #e8edf7; border: 1px solid #2a3a5f; border-radius: 12px; padding: 10px 12px; }
       .grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; margin-top: 14px; }
       @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
@@ -23,6 +24,9 @@
       .muted { font-size: 12px; color: #93a3c7; }
       .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; border: 1px solid #2a3a5f; background: #0f1524; color: #b8c3da; font-size: 12px; }
       .history { margin-top: 14px; }
+      .history-head { display:flex; justify-content: space-between; gap: 10px; align-items:center; margin: 18px 0 6px; }
+      .history-head h2 { font-size:14px; margin: 0; color:#cfe0ff; }
+      .history-head button { padding: 6px 10px; font-size: 12px; border-radius: 10px; }
       .history-item { border: 1px solid #2a3a5f; background: #0f1524; border-radius: 14px; padding: 10px; margin-top: 10px; }
       .history-item header { display:flex; justify-content: space-between; gap: 10px; align-items:center; }
       .history-item h3 { font-size: 13px; margin: 0; color: #e8edf7; }
@@ -46,8 +50,8 @@
             <option value="ru">RU</option>
           </select>
           <button id="run">Generate</button>
-          <button class="secondary" id="copy">Copy summary</button>
-          <button class="secondary" id="export">Export Markdown</button>
+          <button class="secondary" id="copy" disabled>Copy summary</button>
+          <button class="secondary" id="export" disabled>Export Markdown</button>
           <span class="muted" id="status"></span>
         </div>
 
@@ -67,7 +71,10 @@
         </div>
 
         <div class="history">
-          <h2 style="font-size:14px; margin: 18px 0 6px; color:#cfe0ff;">History (last 10)</h2>
+          <div class="history-head">
+            <h2>History (last 10)</h2>
+            <button class="secondary" id="clearHistory" disabled>Clear history</button>
+          </div>
           <div id="history" class="muted">No history yet.</div>
         </div>
       </div>
@@ -87,6 +94,10 @@
       const keywords = el("keywords");
       const historyBox = el("history");
 
+      const btnCopy = el("copy");
+      const btnExport = el("export");
+      const btnClearHistory = el("clearHistory");
+
       function loadHistory() {
         try { return JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch { return []; }
       }
@@ -94,8 +105,26 @@
         localStorage.setItem(LS_KEY, JSON.stringify(items.slice(0, 10)));
       }
 
+      function hasMeaningfulSummary() {
+        const t = (summary.textContent || "").trim();
+        return t.length > 0 && t !== "—";
+      }
+
+      function updateActionButtons() {
+        const enabled = hasMeaningfulSummary();
+        btnCopy.disabled = !enabled;
+        btnExport.disabled = !enabled;
+      }
+
+      function updateClearHistoryButton() {
+        const hasItems = loadHistory().length > 0;
+        btnClearHistory.disabled = !hasItems;
+      }
+
       function renderHistory() {
         const items = loadHistory();
+        updateClearHistoryButton();
+
         if (!items.length) {
           historyBox.className = "muted";
           historyBox.textContent = "No history yet.";
@@ -138,6 +167,7 @@
         input.value = it.input || "";
         language.value = it.language || "pl";
         setOutput(it);
+        status.textContent = "Loaded from history.";
       };
 
       function setOutput(out) {
@@ -153,6 +183,8 @@
         if (!(out.actions || []).length) actions.innerHTML = '<li class="muted">—</li>';
 
         keywords.textContent = (out.keywords || []).join(", ") || "—";
+
+        updateActionButtons();
       }
 
       async function run() {
@@ -185,6 +217,7 @@
       }
 
       async function copySummary() {
+        if (!hasMeaningfulSummary()) return;
         const text = summary.textContent || "";
         await copyText(text);
       }
@@ -199,6 +232,10 @@
       };
 
       function exportMarkdown() {
+        if (!hasMeaningfulSummary()) {
+          status.textContent = "Nothing to export yet.";
+          return;
+        }
         const md = `# Summary\n\n${summary.textContent}\n\n## Actions\n\n${Array.from(actions.querySelectorAll("li")).map(li => `- ${li.textContent}`).join("\n")}\n\n## Keywords\n\n${keywords.textContent}\n`;
         const blob = new Blob([md], { type: "text/markdown" });
         const a = document.createElement("a");
@@ -209,11 +246,26 @@
         status.textContent = "Markdown exported.";
       }
 
+      function clearHistory() {
+        const items = loadHistory();
+        if (!items.length) return;
+        const ok = confirm("Clear history?");
+        if (!ok) return;
+
+        localStorage.removeItem(LS_KEY);
+        renderHistory();
+        updateClearHistoryButton();
+        status.textContent = "History cleared.";
+      }
+
       el("run").addEventListener("click", run);
-      el("copy").addEventListener("click", copySummary);
-      el("export").addEventListener("click", exportMarkdown);
+      btnCopy.addEventListener("click", copySummary);
+      btnExport.addEventListener("click", exportMarkdown);
+      btnClearHistory.addEventListener("click", clearHistory);
 
       renderHistory();
+      updateActionButtons();
+      updateClearHistoryButton();
     </script>
   </body>
 </html>

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Summarizer & Action Items</title>
+    <style>
+      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: #0b0f19; color: #e8edf7; }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 28px 18px 60px; }
+      .card { background: #121a2a; border: 1px solid #23314f; border-radius: 18px; padding: 18px; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+      h1 { font-size: 22px; margin: 0 0 10px; }
+      p { margin: 6px 0 14px; color: #b8c3da; }
+      textarea { width: 100%; min-height: 170px; border-radius: 14px; border: 1px solid #2a3a5f; background: #0f1524; color: #e8edf7; padding: 12px; font-size: 14px; outline: none; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+      button { border: 0; padding: 10px 14px; border-radius: 12px; cursor: pointer; background: #2f6fed; color: white; font-weight: 600; }
+      button.secondary { background: #1e2a45; color: #d6dded; border: 1px solid #2a3a5f; }
+      select { background: #0f1524; color: #e8edf7; border: 1px solid #2a3a5f; border-radius: 12px; padding: 10px 12px; }
+      .grid { display: grid; grid-template-columns: 1.1fr 0.9fr; gap: 14px; margin-top: 14px; }
+      @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+      .out h2 { font-size: 14px; margin: 0 0 8px; color: #cfe0ff; }
+      .box { background: #0f1524; border: 1px solid #2a3a5f; border-radius: 14px; padding: 12px; }
+      ul { margin: 0; padding-left: 18px; color: #d6dded; }
+      .muted { font-size: 12px; color: #93a3c7; }
+      .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; border: 1px solid #2a3a5f; background: #0f1524; color: #b8c3da; font-size: 12px; }
+      .history { margin-top: 14px; }
+      .history-item { border: 1px solid #2a3a5f; background: #0f1524; border-radius: 14px; padding: 10px; margin-top: 10px; }
+      .history-item header { display:flex; justify-content: space-between; gap: 10px; align-items:center; }
+      .history-item h3 { font-size: 13px; margin: 0; color: #e8edf7; }
+      .history-item small { color: #93a3c7; }
+      .history-item .actions { margin-top: 8px; display:flex; gap: 8px; flex-wrap: wrap; }
+      .history-item .actions button { padding: 6px 10px; font-size: 12px; border-radius: 10px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <h1>Summarizer & Action Items</h1>
+        <p>Wklej tekst → dostaniesz streszczenie, action items i słowa kluczowe. Backend: <span class="pill" id="provider">—</span></p>
+
+        <textarea id="input" placeholder="Wklej tekst tutaj..."></textarea>
+
+        <div class="row">
+          <select id="language">
+            <option value="pl" selected>PL</option>
+            <option value="en">EN</option>
+            <option value="ru">RU</option>
+          </select>
+          <button id="run">Generate</button>
+          <button class="secondary" id="copy">Copy summary</button>
+          <button class="secondary" id="export">Export Markdown</button>
+          <span class="muted" id="status"></span>
+        </div>
+
+        <div class="grid out">
+          <div class="box">
+            <h2>Summary</h2>
+            <div id="summary" class="muted">—</div>
+          </div>
+          <div class="box">
+            <h2>Actions</h2>
+            <ul id="actions"><li class="muted">—</li></ul>
+          </div>
+          <div class="box" style="grid-column: 1 / -1;">
+            <h2>Keywords</h2>
+            <div id="keywords" class="muted">—</div>
+          </div>
+        </div>
+
+        <div class="history">
+          <h2 style="font-size:14px; margin: 18px 0 6px; color:#cfe0ff;">History (last 10)</h2>
+          <div id="history" class="muted">No history yet.</div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const API_BASE = "";
+      const LS_KEY = "ag_summarizer_history_v1";
+
+      const el = (id) => document.getElementById(id);
+      const input = el("input");
+      const language = el("language");
+      const status = el("status");
+      const provider = el("provider");
+      const summary = el("summary");
+      const actions = el("actions");
+      const keywords = el("keywords");
+      const historyBox = el("history");
+
+      function loadHistory() {
+        try { return JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch { return []; }
+      }
+      function saveHistory(items) {
+        localStorage.setItem(LS_KEY, JSON.stringify(items.slice(0, 10)));
+      }
+
+      function renderHistory() {
+        const items = loadHistory();
+        if (!items.length) {
+          historyBox.className = "muted";
+          historyBox.textContent = "No history yet.";
+          return;
+        }
+        historyBox.className = "";
+        historyBox.innerHTML = items
+          .map((it, idx) => {
+            const title = it.summary?.slice(0, 70) || "(no summary)";
+            return `
+              <div class="history-item">
+                <header>
+                  <h3>${idx + 1}. ${escapeHtml(title)}</h3>
+                  <small>${new Date(it.ts).toLocaleString()}</small>
+                </header>
+                <div class="muted" style="margin-top:6px;">Provider: ${escapeHtml(it.provider || "—")}</div>
+                <div class="actions">
+                  <button class="secondary" onclick='loadItem(${idx})'>Load</button>
+                  <button class="secondary" onclick='copyText(${JSON.stringify(it.summary || "")})'>Copy summary</button>
+                </div>
+              </div>
+            `;
+          })
+          .join("");
+      }
+
+      function escapeHtml(str) {
+        return String(str)
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;")
+          .replaceAll("'", "&#039;");
+      }
+
+      window.loadItem = (idx) => {
+        const items = loadHistory();
+        const it = items[idx];
+        if (!it) return;
+        input.value = it.input || "";
+        language.value = it.language || "pl";
+        setOutput(it);
+      };
+
+      function setOutput(out) {
+        provider.textContent = out.provider || "—";
+        summary.textContent = out.summary || "—";
+
+        actions.innerHTML = "";
+        (out.actions || []).forEach((a) => {
+          const li = document.createElement("li");
+          li.textContent = a;
+          actions.appendChild(li);
+        });
+        if (!(out.actions || []).length) actions.innerHTML = '<li class="muted">—</li>';
+
+        keywords.textContent = (out.keywords || []).join(", ") || "—";
+      }
+
+      async function run() {
+        status.textContent = "Working...";
+        try {
+          const text = input.value.trim();
+          if (!text) {
+            status.textContent = "Paste some text first.";
+            return;
+          }
+          const res = await fetch(`/api/summarize`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, language: language.value })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data?.error || "Request failed");
+
+          const out = { ...data, input: text, language: language.value, ts: Date.now() };
+          setOutput(out);
+
+          const hist = [out, ...loadHistory()];
+          saveHistory(hist);
+          renderHistory();
+
+          status.textContent = "Done.";
+        } catch (e) {
+          status.textContent = `Error: ${e.message}`;
+        }
+      }
+
+      async function copySummary() {
+        const text = summary.textContent || "";
+        await copyText(text);
+      }
+
+      window.copyText = async (text) => {
+        try {
+          await navigator.clipboard.writeText(text);
+          status.textContent = "Copied.";
+        } catch {
+          status.textContent = "Copy failed (browser permissions).";
+        }
+      };
+
+      function exportMarkdown() {
+        const md = `# Summary\n\n${summary.textContent}\n\n## Actions\n\n${Array.from(actions.querySelectorAll("li")).map(li => `- ${li.textContent}`).join("\n")}\n\n## Keywords\n\n${keywords.textContent}\n`;
+        const blob = new Blob([md], { type: "text/markdown" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "summary.md";
+        a.click();
+        URL.revokeObjectURL(a.href);
+        status.textContent = "Markdown exported.";
+      }
+
+      el("run").addEventListener("click", run);
+      el("copy").addEventListener("click", copySummary);
+      el("export").addEventListener("click", exportMarkdown);
+
+      renderHistory();
+    </script>
+  </body>
+</html>
